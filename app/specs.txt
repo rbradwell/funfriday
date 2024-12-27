@@ -1,0 +1,155 @@
+Here is the updated specification that includes all the new requirements and details:
+
+---
+
+### **Multiplayer Quiz API - FastAPI, PostgreSQL, Redis, and WebSockets**
+
+#### **Purpose**
+This API facilitates a real-time multiplayer quiz game using WebSockets for communication, PostgreSQL for persistent storage, and Redis for scalable session management. The API allows players to join parties, answer questions, and track performance by category.
+
+---
+
+### **Functionality**
+
+- **Persistent question pool**: The API fetches questions from a PostgreSQL database, allowing for dynamic question selection based on category.
+- **Player performance tracking by category**: Player performance is tracked by category, storing scores and performance in different categories for personalized feedback.
+- **Redis integration**: Redis is used to store session data for each active party, ensuring efficient real-time communication and scalability for larger user bases.
+- **WebSocket communication**: Real-time communication between players and the server, sending live question updates and player scores.
+- **Automatic question progression**: When the question timer runs out, the game automatically progresses to the next question.
+
+---
+
+### **API Endpoints**
+
+#### **`/api/party/init` (POST)**
+- **Request body**:
+    - `player_id`: String, the ID of the player initiating the party.
+    - `category`: String, the category of questions for the party.
+    - `rounds`: Integer, the number of rounds to play.
+    - `timeout`: Integer, the time (in seconds) each question should remain active. Defaults to 30 seconds.
+  
+- **Response**:
+    - `party_id`: String, a unique ID for the created party.
+  
+- **Functionality**:
+    - Creates a new party with a unique `party_id` and `game_id`.
+    - Stores the player ID in the party data.
+    - Initializes the `current_round` to 1.
+    - Fetches a pool of random questions from the database, based on the requested category and rounds.
+    - Saves party details in Redis.
+    - Sends a notification to all connected clients in the party when the party is initialized.
+
+---
+
+#### **`/api/party/{party_id}/join` (POST)**
+- **Request parameters**:
+    - `party_id`: String, the unique ID of the party to join.
+  
+- **Request body**:
+    - `user_id`: String, the ID of the user joining the party.
+  
+- **Response**:
+    - JSON object with:
+        - `message`: "Joined party successfully".
+        - `game_id`: The `game_id` associated with the party.
+
+- **Functionality**:
+    - Checks if a party with the given `party_id` exists.
+    - Adds the `user_id` to the `party_players` table.
+    - Returns the success message and `game_id`.
+  
+---
+
+#### **`/ws/{party_id}` (WebSocket)**
+- **Request parameters**:
+    - `party_id`: String, the unique ID of the party.
+
+- **Functionality**:
+    - Establishes a WebSocket connection for the given `party_id`.
+    - Adds the WebSocket connection to a list of connected clients for the party.
+    - Sends the current question data to all connected clients immediately upon connection.
+    - Sends updated question data to all connected clients when the question changes.
+    - Handles client disconnections and reconnections.
+    - Receives answer submissions from clients and updates the player scores accordingly.
+    - Sends keep-alive messages to prevent connection timeouts.
+
+---
+
+#### **`/api/party/{party_id}/question_data` (GET)**
+- **Request parameters**:
+    - `party_id`: String, the unique ID of the party.
+
+- **Response**:
+    - JSON object with:
+        - `current_round`: The round number currently being played.
+        - `question`: The current question.
+        - `choices`: The available answer choices for the current question.
+        - `players`: A list of players and their current scores.
+
+- **Functionality**:
+    - Retrieves the current question, round, and player scores.
+    - Ensures that data is always up-to-date for active parties.
+
+---
+
+### **Database**
+
+- **PostgreSQL Database (quizdb)**:
+    - **Tables**:
+        1. **questions**: Stores the questions, answers, choices, and categories.
+            - `id`: SERIAL PRIMARY KEY
+            - `question`: TEXT NOT NULL
+            - `answer`: TEXT NOT NULL
+            - `choice1`: TEXT NOT NULL
+            - `choice2`: TEXT NOT NULL
+            - `choice3`: TEXT NOT NULL
+            - `category`: TEXT NOT NULL
+        2. **parties**: Stores the party details (including `party_id`, `game_id`, and `player_id`).
+            - `party_id`: UUID PRIMARY KEY
+            - `game_id`: UUID NOT NULL
+            - `player_id`: TEXT NOT NULL
+        3. **party_players**: Stores the players and their scores associated with a party.
+            - `party_id`: UUID NOT NULL
+            - `user_id`: TEXT NOT NULL
+            - `score`: INTEGER NOT NULL DEFAULT 0
+            - `PRIMARY KEY (party_id, user_id)`
+
+---
+
+### **Redis for Session Management**
+
+- Redis is used to store and manage the active sessions for each party:
+    - Party data (such as the current round, players, question pool, etc.) is stored in Redis for fast access.
+    - When the game progresses to the next round, Redis is updated to reflect the current state.
+    - When the game ends, the party data is deleted from Redis.
+
+---
+
+### **Real-Time Features and Question Flow**
+
+- **Automatic Question Progression**:
+    - The game automatically progresses to the next question when the current question’s timer runs out.
+    - If the party’s round count is exceeded, the game ends.
+  
+- **WebSocket Communication**:
+    - The game sends the entire state (question data, player scores, round number) via WebSocket.
+    - Players submit answers through WebSocket, and the server validates the answers, updates player scores, and broadcasts the updated score to all connected clients.
+
+---
+
+### **Scalability Considerations**
+
+- **Redis**: Redis helps handle scaling by efficiently storing session data and reducing the load on PostgreSQL. It ensures fast access to real-time data for parties with many connected clients.
+- **WebSockets**: WebSockets enable low-latency real-time updates to all connected players.
+- **Database Connections**: Each party has its own unique connection pool, allowing for concurrent games to progress independently.
+
+---
+
+### **Error Handling and Robustness**
+
+- **WebSocket Reconnection**: The WebSocket connection will handle disconnections and reconnects, preserving the session.
+- **Error Responses**: If a player tries to join a non-existent party, the system will return a `404 Not Found` error. If the player is already in the party, a `400 Bad Request` error is returned.
+- **Party Completion**: Once all players are disconnected, the party session will be deleted from Redis, and the game will conclude.
+
+---
+

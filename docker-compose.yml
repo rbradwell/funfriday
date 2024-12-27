@@ -1,0 +1,41 @@
+services:
+  quizdb:
+    build: ./database
+    environment:
+      - POSTGRES_USER=quizuser
+      - POSTGRES_PASSWORD=quizpassword
+      - POSTGRES_DB=quizdb
+    ports:
+      - "5432:5432"
+
+  # frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "3000:3000"
+  #   volumes:
+  #     - ./frontend:/app
+  #   environment:
+  #     - NODE_ENV=production
+
+  quizbackend:
+    build: ./app
+    ports:
+      - "8000:8000"
+    environment:
+      - DB_HOST=quizdb
+      - DB_USER=quizuser
+      - DB_PASS=quizpassword
+      - SECRET_KEY=mysecretkey
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - quizdb
+      - redis
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
