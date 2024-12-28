@@ -1,10 +1,10 @@
-// src/components/InitPartyPage.js
+
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-// TODO - shouldnt be able to get to this page if already in a party
+// TODO - shouldnt be able to get to this page if already in a party, should be redirected to lobby if not logged in
 function GameCreationPage() {
-    const [playerId, setPlayerId] = useState('');
+    const [playerId, setPlayerId] = useState(localStorage.getItem('playerId') || '');
     const [category, setCategory] = useState('');
     const [rounds, setRounds] = useState(1);
     const [timeout, setTimeout] = useState(30);
@@ -24,14 +24,12 @@ function GameCreationPage() {
                 alert('Error: ' + error.message);
             }
         };
-
         fetchCategories();
     }, []);
 
     const handlePartyCreationSubmit = async (event) => {
         event.preventDefault();
         console.log('creating party', playerId, category, rounds, timeout);
-
         try {
             const response = await fetch('/api/party/init', {
                 method: 'POST',
@@ -46,12 +44,10 @@ function GameCreationPage() {
                 })
             });
 
-            // TODO - handle error. see QuestionsPage.jsx should have common error handling component
             if (!response.ok) {
                 console.log('error', response);
                 throw new Error('Failed to initialize party');
             }
-
             const data = await response.json();
             console.log('data from party init', data);
             navigate(`/`);
@@ -64,19 +60,8 @@ function GameCreationPage() {
     return (
         <main>
             <section className="container">
-                <h3>Fun Friday - Create a Game</h3>
+                <h3>Fun Friday - Create a Quiz</h3>
                 <form onSubmit={handlePartyCreationSubmit}>
-                    <label>
-                    Player ID:
-                    <input
-                        type="text"
-                        value={playerId}
-                        onChange={(e) => setPlayerId(e.target.value)}
-                        required
-                    />
-                    </label>
-                    <br /><br />
-
                     <label>
                         Category:
                         <select
@@ -115,9 +100,7 @@ function GameCreationPage() {
                     <br /><br />
 
                     <button type="submit">Create Game</button>
-
                 </form>
- 
             </section>
         </main>
     );

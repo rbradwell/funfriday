@@ -28,10 +28,10 @@ function LobbyPage() {
 
         fetchParties();
 
-        // if (loggedIn) {
-        //     const interval = setInterval(fetchParties, 5000);
-        //     return () => clearInterval(interval);
-        // }
+        if (loggedIn) {
+            const interval = setInterval(fetchParties, 5000);
+            return () => clearInterval(interval);
+        }
     }, [loggedIn]);
 
     const handleJoinParty = async (partyId) => {
@@ -40,7 +40,7 @@ function LobbyPage() {
             const response = await axios.post(`/api/party/${partyId}/join`, {
                 user_id: playerId
             });
-            navigate(`/questions?party_id=${partyId}`);
+            navigate(`/quiz?party_id=${partyId}`);
         } catch (error) {
             alert('Error joining party: ' + error.message);
         }

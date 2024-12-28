@@ -1,8 +1,8 @@
 import {React, useState, useEffect} from 'react';
 import { useSearchParams } from "react-router-dom";
-import axios from 'axios';
+import { useNavigate } from 'react-router-dom';
 
-function QuestionsPage() {
+function QuizPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState()
   const [socket, setSocket] = useState(null);
@@ -11,11 +11,13 @@ function QuestionsPage() {
   const [selectedChoice, setSelectedChoice] = useState(null);
   const [submittedAnswer, setSubmittedAnswer] = useState(null);
   const [searchParams] = useSearchParams();
-
+  const [scores, setScores] = useState(null);
+  const navigate = useNavigate();
+  const [timeLeft, setTimeLeft] = useState(null);
+  
   useEffect(() => {
     const partyIdFromUrl = searchParams.get("party_id");
     if (!partyIdFromUrl) {
-      console.log('partyId is missing');
       setError("Party ID is missing.");
       setLoading(false);
       return;
@@ -24,6 +26,26 @@ function QuestionsPage() {
       setPartyId(partyIdFromUrl);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    let timer;
+    if (currentQuestion && currentQuestion.timeout) {
+      setTimeLeft(currentQuestion.timeout);
+      timer = setInterval(() => {
+        setTimeLeft((prevTime) => {
+          if (prevTime <= 1) {
+            clearInterval(timer);
+            return 0;
+          }
+          return prevTime - 1;
+        });
+      }, 1000);
+    }
+
+    return () => {
+      clearInterval(timer);
+    };
+  }, [currentQuestion]);
 
   useEffect(() => {
     const queryParams = new URLSearchParams(location.search);
@@ -41,20 +63,27 @@ function QuestionsPage() {
         if (quizData.event === "new_question") {
           setCurrentQuestion({
             question: quizData.question,
-            choices: quizData.choices
+            choices: quizData.choices,
+            timeout: quizData.timeout
           });
           setLoading(false);
           setSelectedChoice(null);
           setSubmittedAnswer(null);
+          setTimeLeft(quizData.timeout);
+        } else if (quizData.event === "game_over") {
+          setScores(quizData.scores);
+          setLoading(false);
+          setTimeLeft(null);
+          setTimeout(() => {
+            navigate(`/`); // Redirect to LobbyPage
+          }, 5000);
         }
         setLoading(false);
       };
 
       websocket.onerror = (event) => {
-        console.error('WebSocket error:', event);
         setError('WebSocket error occurred');
       };
-      console.log('setting websocket', websocket);
       setSocket(websocket);
       return () => {
         if (websocket) {
@@ -66,13 +95,14 @@ function QuestionsPage() {
   }, [partyId]);
 
   const handleChoiceClick = (choice) => {
-    setSelectedChoice(choice);
+    if (!submittedAnswer) {
+      setSelectedChoice(choice);
+    }
   };
 
   const handleSubmitAnswer = () => {
-    console.log('answer', selectedChoice);
     if (socket && selectedChoice) {
-      console.log('sending answer event');
+      console.log('sending answer selectedChoice', selectedChoice, 'to websocket with partyId', partyId);
       const playerId = localStorage.getItem('playerId');
       socket.send(
         JSON.stringify({
@@ -127,20 +157,48 @@ function QuestionsPage() {
     );
   }
 
+  if (scores) {
+    return (
+      <main>
+      <section className="container">
+        <h3>Game Over! Scores:</h3>
+        <ul>
+          {Object.entries(scores).map(([userId, scoreData]) => (
+            <li key={userId}>
+              <p>User {userId}: {scoreData.score}</p>
+              <ul>
+                {Object.entries(scoreData.category_scores).map(([category, categoryScore]) => (
+                  <li key={category}>
+                    {category} category : {categoryScore}
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ))}
+        </ul>
+        <p>Redirecting to the lobby in 5 seconds...</p>
+      </section>
+      </main>
+    );
+  }
+
   return (
     <main>
       <section className="container">
         <h3>{currentQuestion.question}</h3>
+        {timeLeft !== null && (
+          <p>Time left: {timeLeft} seconds</p>
+        )}
         <ul style={{ listStyleType: "none", padding: 0 }}>
           {currentQuestion.choices.map((choice, index) => (
             <li
               key={index}
               onClick={() => handleChoiceClick(choice)}
               style={{
-                cursor: "pointer",
+                cursor: submittedAnswer ? "default" : "pointer",
                 padding: "10px",
                 margin: "5px 0",
-                border: selectedChoice === choice ? "2px solid #4caf50" : "1px solid #ccc",
+                border: selectedChoice === choice && !submittedAnswer ? "2px solid #4caf50" : "1px solid #ccc",
                 borderRadius: "5px",
               }}
             >
@@ -149,7 +207,7 @@ function QuestionsPage() {
           ))}
         </ul>
         {submittedAnswer ? (
-          <p>You answered: {submittedAnswer}</p>
+          <p>You answered: <strong>{selectedChoice}</strong></p>
         ) : (
           <button
             type="button"
@@ -165,4 +223,4 @@ function QuestionsPage() {
   );
 }
 
-export default QuestionsPage;
+export default QuizPage;

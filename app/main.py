@@ -45,7 +45,6 @@ class PartyStartRequest(BaseModel):
     party_id: str
     user_id: str
 
-
 class PartyMessage(BaseModel):
     event: str
     message: str
@@ -106,6 +105,7 @@ async def init_party(request: PartyInitRequest):
 
 # @app.post("/api/party/start")
 async def start_game(request: PartyStartRequest):
+    print(f"Starting game for party: {request.party_id}")
     party = get_party_or_404(request.party_id)
     # Ensure the user is the creator
     if party["creator"] != request.user_id:
@@ -116,29 +116,31 @@ async def start_game(request: PartyStartRequest):
     if party["state"] != "waiting_for_players":
         raise HTTPException(status_code=400, detail="The game is already in progress or has ended")
 
-    party = atomic_update_party(request.party_id, set_party_state, "in_progress")
-    if not party:
-        raise HTTPException(status_code=500, detail="Failed to update party state")
-    
+    party = set_party_state(party, "in_progress")
+    save_party_to_redis(request.party_id, party)
+
     # Start the first round
     asyncio.create_task(start_round(request.party_id))
 
     return JSONResponse({"message": "First round started successfully"})
 
 async def start_round(party_id: str):
+    print(f"Starting round for party: {party_id}")
     party = load_party_from_redis(party_id)
     if not party:
         return
 
     if party["current_round"] > party["rounds"]:
         # Game over
-        party = atomic_update_party(party_id, set_party_state, "ended_successfully")
+        party = set_party_state(party, "ended_successfully")
+        save_party_to_redis(party_id, party)
         await broadcast_to_party(party_id, {"event": "game_over", "scores": party["players"]})
         return
 
     # Use question from the pre-fetched pool
     question = party["question_pool"].pop(0)
-    party = atomic_update_party(party_id, update_current_question, question)
+    party = update_current_question(party, question)
+    save_party_to_redis(party_id, party)
 
     await broadcast_to_party(party_id, {
         "event": "new_question",
@@ -155,10 +157,10 @@ async def start_round(party_id: str):
 
     if "current_question" in party:
         party.pop("current_question")
-        party = atomic_update_party(party_id, set_current_round, party["current_round"])
+        set_current_round(party)
+        save_party_to_redis(party_id, party)
         await broadcast_to_party(party_id, {"event": "question_timeout"})
         await start_round(party_id)
-
 
 @app.post("/api/party/{party_id}/join")
 def join_party(party_id: str, request: PartyJoinRequest):
@@ -170,8 +172,9 @@ def join_party(party_id: str, request: PartyJoinRequest):
         print(f"User already in party: {request.user_id}")
         raise HTTPException(status_code=400, detail="User already in party")
 
-    print(f"Atomic update party: {party_id}")
-    party = atomic_update_party(party_id, init_player_score, request.user_id)
+
+    party = init_player_score(party, request.user_id)
+    save_party_to_redis(party_id, party)
 
     print(f"Party after join: {party}")
     return JSONResponse({"message": "Joined party successfully", "game_id": party["game_id"]})
@@ -212,22 +215,19 @@ async def websocket_endpoint(websocket: WebSocket, party_id: str):
     try:
         while True:
             print("waiting for data")
-            data = await websocket.receive_json()
-            print(f"Received data: {data}")
+            response = await websocket.receive_json()
+            print(f"Received data: {response}")
 
             # all events must have a party_id and user_id
-            party_id = data.get("party_id")
+            party_id = response.get("party_id")
             if not party_id:
                 continue
 
-            user_id = data.get("user_id")
+            user_id = response.get("user_id")
             if not user_id:
                 continue
 
-            data = redis_client.get(f"party:{party_id}")
-            party =  json.loads(data) if data else None
-            print(f"Party loaded from redis: {party}")
-
+            party = load_party_from_redis(party_id)
             if not party:
                 print(f"Party not found: {party_id}")
                 continue
@@ -236,17 +236,18 @@ async def websocket_endpoint(websocket: WebSocket, party_id: str):
                 print(f"User not in party: {user_id}")
                 continue
 
-            if data.get("event") == "answer":
-                answer = data.get("answer")
+            if response.get("event") == "answer":
+                answer = response.get("answer")
                 print(f"Received answer: {answer} for user: {user_id}")
-                party = atomic_update_party(party_id, update_score, party, user_id, answer)
-
+                party = update_score(party, user_id, answer)
+                save_party_to_redis(party_id, party)
                 await broadcast_to_party(party_id, {
                     "event": "score_update",
                     "user_id": user_id,
                     "score": party["players"][user_id]["score"]
                 })
-            elif data.get("event") == "start_game":
+            elif response.get("event") == "start_game":
+                print(f"Starting game for party: {party_id}")
                 await start_game(PartyStartRequest(party_id=party_id, user_id=user_id))
                 
     except WebSocketDisconnect:
@@ -309,46 +310,6 @@ def get_party_or_404(party_id: str):
         raise HTTPException(status_code=404, detail="Party not found")
     return party
 
-def atomic_update_party(party_id, update_func, *args, **kwargs):
-    print(f"Atomic update party: {party_id}")
-    retry_limit = 3  # Set a retry limit
-    retries = 0
-    with redis_client.pipeline() as pipe:
-        while retries < retry_limit:
-            try:
-                print(f"Watching party: {party_id}")
-                pipe.watch(f"party:{party_id}")
-                 # Fetch the current party data inside the pipeline
-                current_party_data = redis_client.get(f"party:{party_id}")
-                if not current_party_data:
-                    print(f"No party data found for: {party_id}")
-                    return None
-
-                party_data = json.loads(current_party_data)
-                print(f"Party data from redis: {party_data}")
-                if not party_data:
-                    print(f"No party data found for: {party_id}")
-                    return None
-                
-                print(f"Applying update function: {update_func.__name__}")
-                print(f"Args: {args}")  
-                print(f"Kwargs: {kwargs}")
-                pipe.multi()
-
-                print(f"Party data before update: {party_data}")
-                # Apply the update function with additional arguments
-                updated_party = update_func(party_data, *args, **kwargs)
-                print(f"Party data after update: {updated_party}")
-                pipe.set(f"party:{party_id}", json.dumps(updated_party))
-                pipe.execute()
-                print(f"Successfully updated party: {party_id}")
-                return updated_party
-            except redis.WatchError:
-                print(f"WatchError for party: {party_id}, retrying... ({retries + 1}/{retry_limit})")
-                retries += 1
-            finally:
-                pipe.unwatch()
-
 def set_party_state(party: dict, state: str) -> dict:
     party["state"] = state
     return party
@@ -370,22 +331,19 @@ def update_score(party, user_id, answer):
 
     if answer == correct_answer:
         print(f"Correct answer: {answer} for user: {user_id}")
-        update_player_score(party, user_id, correct=True)
-
-    # Update performance by category
-    update_category_score(party, user_id, correct=True)
+        update_player_score(party, user_id)
+        # Update performance by category
+        update_category_score(party, user_id)
     return party
 
-def update_player_score(party, user_id, correct=False):
-    if correct:
-        party["players"][user_id]["score"] += 1
+def update_player_score(party, user_id):
+    party["players"][user_id]["score"] += 1
     print(f"User score after update: {party['players'][user_id]['score']}")    
     return party
 
-def update_category_score(party, user_id, correct=False):
-    if correct:
-        category = party["category"]
-        party["players"][user_id]["category_scores"][category] = party["players"][user_id]["category_scores"].get(category, 0) + 1
+def update_category_score(party, user_id):
+    category = party["category"]
+    party["players"][user_id]["category_scores"][category] = party["players"][user_id]["category_scores"].get(category, 0) + 1
     print(f"User category score: {party['players'][user_id]['category_scores'][category]}")
     return party
 
