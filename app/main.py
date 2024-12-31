@@ -87,7 +87,8 @@ async def create_user(request: UserCreateRequest):
     user_id = str(uuid.uuid4())
     user_data = {
         "user_id": user_id,
-        "user_name": request.user_name
+        "user_name": request.user_name,
+        "current_party": { "score": 0, "category_scores": {}}
     }
     save_user_to_redis(user_id, user_data)
     return JSONResponse({"user_id": user_id})
@@ -110,7 +111,6 @@ async def init_party(request: PartyInitRequest):
         "timeout": request.timeout,
         "current_round": 1,
         "state": "waiting_for_players",
-        "players": {},
         "question_pool": question_pool
     }
     print(f"saving initialized party data: {party_data}")
@@ -147,7 +147,7 @@ async def start_round(party_id: str):
         # Game over
         party = set_party_state(party, "ended_successfully")
         save_party_to_redis(party_id, party)
-        await broadcast_to_party(party_id, {"event": "game_over", "scores": get_player_scores_with_names_and_categories(party_id) })
+        await broadcast_to_party(party_id, {"event": "game_over", "scores": get_player_scores(party_id) })
         return
 
     # Use question from the pre-fetched pool
@@ -184,9 +184,6 @@ async def join_party(party_id: str, request: PartyJoinRequest):
     if is_user_in_party(party_id, request.user_id):
         print(f"User already in party: {request.user_id}")
         raise HTTPException(status_code=400, detail="User already in party")
-
-    party = init_player_score(party, request.user_id)
-    save_party_to_redis(party_id, party)
 
     print(f"Party after join: {party}")
 
@@ -249,8 +246,8 @@ async def websocket_endpoint(websocket: WebSocket, party_id: str, user_id: str):
             if response.get("event") == "answer":
                 answer = response.get("answer")
                 print(f"Received answer: {answer} for user: {user_id}")
-                party = update_score(party, user_id, answer)
-                save_party_to_redis(party_id, party)
+                if answer == party["current_question"]["answer"]:
+                    update_player_score(party_id, party["category"], user_id)
             elif response.get("event") == "start_game":
                 print(f"Starting game for party: {party_id}")
                 await start_game(PartyStartRequest(party_id=party_id, user_id=user_id))
@@ -356,37 +353,13 @@ def set_current_round(party: dict) -> dict:
     party["current_round"] += 1
     return party
 
-def update_score(party, user_id, answer):
-    correct_answer = party["current_question"]["answer"]
-    print(f"Correct answer: {correct_answer}")
-
-    user_score = party["players"][user_id]["score"]
-    print(f"User score: {user_score}")
-
-    if answer == correct_answer:
-        print(f"Correct answer: {answer} for user: {user_id}")
-        update_player_score(party, user_id)
-        update_category_score(party, user_id)
-    return party
-
-def update_player_score(party, user_id):
-    party["players"][user_id]["score"] += 1
-    print(f"User score after update: {party['players'][user_id]['score']}")    
-    return party
-
-def update_category_score(party, user_id):
-    category = party["category"]
-    party["players"][user_id]["category_scores"][category] = party["players"][user_id]["category_scores"].get(category, 0) + 1
-    print(f"User category score: {party['players'][user_id]['category_scores'][category]}")
-    return party
-
-def init_player_score(party, user_id):
-    party["players"][user_id] = {
-            "score": 0,
-            "category_scores": {}
-    }
-    return party
-
+def update_player_score(party_id, category, user_id):
+    user_data = load_user_from_redis(user_id)
+    if user_data:
+        user_data["current_party"]["party_id"] = party_id
+        user_data["current_party"]["score"] = user_data["current_party"]["score"] + 1
+        user_data["current_party"]["category_scores"][category] = user_data["current_party"]["category_scores"].get(category, 0) + 1
+        save_user_to_redis(user_id, user_data)
 
 def save_party_to_redis(party_id, party_data):
     redis_client.set(f"party:{party_id}", json.dumps(party_data))
@@ -417,19 +390,22 @@ def get_user_ids_for_party(party_id: str) -> str:
             user_names.append(user_data.get("user_name", "Unknown"))
     return ','.join(user_names)
 
-def get_player_scores_with_names_and_categories(party_id: str) -> dict:
+def get_player_scores(party_id: str) -> dict:
     party = load_party_from_redis(party_id)
     if not party:
         raise HTTPException(status_code=404, detail="Party not found")
 
     player_scores = {}
-    for user_id, player_data in party["players"].items():
+    party_sockets = websocket_connections.get(party_id, {})
+    
+    for user_id in party_sockets.keys():
         user_data = load_user_from_redis(user_id)
         if user_data:
             user_name = user_data.get("user_name", "Unknown")
+            current_party = user_data.get("current_party", {})
             player_scores[user_name] = {
-                "total_score": player_data["score"],
-                "category_scores": player_data.get("category_scores", {})
+                "total_score": current_party.get("score", 0),
+                "category_scores": current_party.get("category_scores", {})
             }
 
     return player_scores
