@@ -14,9 +14,12 @@ function QuizPage() {
   const [scores, setScores] = useState(null);
   const navigate = useNavigate();
   const [timeLeft, setTimeLeft] = useState(null);
-  
+  const [userId, setUserId] = useState(null);
+  const [creatorId, setCreatorId] = useState(null);
+
   useEffect(() => {
     const partyIdFromUrl = searchParams.get("party_id");
+    const userIdFromUrl = searchParams.get("user_id");
     if (!partyIdFromUrl) {
       setError("Party ID is missing.");
       setLoading(false);
@@ -24,6 +27,9 @@ function QuizPage() {
     }
     if (partyIdFromUrl) {
       setPartyId(partyIdFromUrl);
+    }
+    if (userIdFromUrl) {
+      setUserId(userIdFromUrl);
     }
   }, [searchParams]);
 
@@ -48,10 +54,10 @@ function QuizPage() {
   }, [currentQuestion]);
 
   useEffect(() => {
-    const queryParams = new URLSearchParams(location.search);
     if (partyId) {
       // TODO - handle websocket connection errors and reconnect
-      const websocket = new WebSocket(`ws://localhost:8000/ws/${partyId}`);
+      const playerId = localStorage.getItem('playerId');
+      const websocket = new WebSocket(`ws://localhost:8000/ws/${partyId}?user_id=${playerId}`);
 
       websocket.onopen = () => {
         console.log('WebSocket connection opened');
@@ -91,6 +97,23 @@ function QuizPage() {
           websocket.close();
         }
       };
+    }
+  }, [partyId]);
+
+  useEffect(() => {
+    if (partyId) {
+      const fetchCreatorId = async () => {
+        try {
+          const response = await fetch(`/api/party/${partyId}`);
+          const data = await response.json();
+          setCreatorId(data.creator_id); // Assume the API returns the creator's ID
+        } catch (error) {
+          console.error("Failed to fetch creator ID:", error);
+          setError("Failed to fetch creator ID.");
+        }
+      };
+
+      fetchCreatorId();
     }
   }, [partyId]);
 
@@ -150,9 +173,11 @@ function QuizPage() {
         <p style={{ color: "blue", marginBottom: "20px" }}>
           Waiting for game to start!
         </p>
-        <button onClick={handleStartGame} className="btn btn-block">
-          Start Game
-        </button>
+        {userId === creatorId && (
+          <button onClick={handleStartGame} className="btn btn-block">
+            Start Game
+          </button>
+        )}
       </div>
     );
   }
@@ -165,7 +190,7 @@ function QuizPage() {
         <ul>
           {Object.entries(scores).map(([userId, scoreData]) => (
             <li key={userId}>
-              <p>User {userId}: {scoreData.score}</p>
+              <p>User {userId}: {scoreData.total_score}</p>
               <ul>
                 {Object.entries(scoreData.category_scores).map(([category, categoryScore]) => (
                   <li key={category}>
@@ -185,6 +210,7 @@ function QuizPage() {
   return (
     <main>
       <section className="container">
+        <br/><br/>
         <h3>{currentQuestion.question}</h3>
         {timeLeft !== null && (
           <p>Time left: {timeLeft} seconds</p>

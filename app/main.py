@@ -32,6 +32,9 @@ websocket_connections = {}
 # Define allowed origins
 ALLOWED_ORIGINS = ["http://localhost:5173"]
 
+class UserCreateRequest(BaseModel):
+    user_name: str
+
 class PartyInitRequest(BaseModel):
     player_id: str
     category: str
@@ -79,6 +82,17 @@ async def initialize_question_pool(category: str, num_questions: int) -> List[di
         "answer": q[2]
     } for q in questions]
 
+@app.post("/api/user/create")
+async def create_user(request: UserCreateRequest):
+    user_id = str(uuid.uuid4())
+    user_data = {
+        "user_id": user_id,
+        "user_name": request.user_name
+    }
+    save_user_to_redis(user_id, user_data)
+    return JSONResponse({"user_id": user_id})
+
+
 @app.post("/api/party/init")
 async def init_party(request: PartyInitRequest):
     party_id = str(uuid.uuid4())
@@ -97,13 +111,13 @@ async def init_party(request: PartyInitRequest):
         "current_round": 1,
         "state": "waiting_for_players",
         "players": {},
-        "question_pool": question_pool # TODO: separate question pool from party data
+        "question_pool": question_pool
     }
+    print(f"saving initialized party data: {party_data}")
     save_party_to_redis(party_id, party_data)
 
     return JSONResponse({"party_id": party_id})
 
-# @app.post("/api/party/start")
 async def start_game(request: PartyStartRequest):
     print(f"Starting game for party: {request.party_id}")
     party = get_party_or_404(request.party_id)
@@ -112,7 +126,6 @@ async def start_game(request: PartyStartRequest):
         raise HTTPException(status_code=403, detail="Only the party creator can start the game")
     
     # Ensure the first round hasn't already started
-    # TODO: allow users to join after the first round has started?
     if party["state"] != "waiting_for_players":
         raise HTTPException(status_code=400, detail="The game is already in progress or has ended")
 
@@ -134,7 +147,7 @@ async def start_round(party_id: str):
         # Game over
         party = set_party_state(party, "ended_successfully")
         save_party_to_redis(party_id, party)
-        await broadcast_to_party(party_id, {"event": "game_over", "scores": party["players"]})
+        await broadcast_to_party(party_id, {"event": "game_over", "scores": get_player_scores_with_names_and_categories(party_id) })
         return
 
     # Use question from the pre-fetched pool
@@ -163,25 +176,29 @@ async def start_round(party_id: str):
         await start_round(party_id)
 
 @app.post("/api/party/{party_id}/join")
-def join_party(party_id: str, request: PartyJoinRequest):
+async def join_party(party_id: str, request: PartyJoinRequest):
     print(f"Joining party: {party_id}, user_id: {request.user_id}")
     party = get_party_or_404(party_id)
 
     print(f"Party in join: {party}")
-    if request.user_id in party["players"]:
+    if is_user_in_party(party_id, request.user_id):
         print(f"User already in party: {request.user_id}")
         raise HTTPException(status_code=400, detail="User already in party")
-
 
     party = init_player_score(party, request.user_id)
     save_party_to_redis(party_id, party)
 
     print(f"Party after join: {party}")
+
     return JSONResponse({"message": "Joined party successfully", "game_id": party["game_id"]})
 
+def add_websocket_for_userid(party_id: str, user_id: str, websocket: WebSocket):
+    party_sockets = websocket_connections.get(party_id, {})
+    party_sockets[user_id] = websocket
+    websocket_connections[party_id] = party_sockets
 
 @app.websocket("/ws/{party_id}")
-async def websocket_endpoint(websocket: WebSocket, party_id: str):
+async def websocket_endpoint(websocket: WebSocket, party_id: str, user_id: str):
     print(f"Client connected to party: {party_id}")
     # Check the Origin header
     origin = websocket.headers.get("origin")
@@ -191,26 +208,17 @@ async def websocket_endpoint(websocket: WebSocket, party_id: str):
         await websocket.close(code=1008)  # Policy Violation
         return
 
-    print(f"Origin is in ALLOWED_ORIGINS: {origin}")
-    print(f"websocket.headers: {websocket.headers}")
-
     await websocket.accept()
 
-    print("after accept")
     # Load the party from Redis
     party = load_party_from_redis(party_id)
-    print(f"Party: {party_id}")
     if not party:
         print(f"Party not found: {party_id}")
         await websocket.close()
         return
 
-    print(f"Current websocket connections for party {party_id}: {websocket_connections.get(party_id, [])}")
-
     # Add the client to the party's connection list
-    websocket_connections.setdefault(party_id, []).append(websocket)
-
-    print(f"Checking if current_question is in party: {party}")
+    add_websocket_for_userid(party_id, user_id, websocket)
 
     try:
         while True:
@@ -221,10 +229,12 @@ async def websocket_endpoint(websocket: WebSocket, party_id: str):
             # all events must have a party_id and user_id
             party_id = response.get("party_id")
             if not party_id:
+                print(f"Party not found: {party_id}")
                 continue
 
             user_id = response.get("user_id")
             if not user_id:
+                print(f"User not connected to party: {user_id}")
                 continue
 
             party = load_party_from_redis(party_id)
@@ -232,37 +242,44 @@ async def websocket_endpoint(websocket: WebSocket, party_id: str):
                 print(f"Party not found: {party_id}")
                 continue
 
-            if user_id not in party["players"]:
-                print(f"User not in party: {user_id}")
-                continue
+            if not is_user_in_party(party_id, user_id):
+                await websocket.close(code=1008)
+                raise HTTPException(status_code=403, detail="User not connected to party")
 
             if response.get("event") == "answer":
                 answer = response.get("answer")
                 print(f"Received answer: {answer} for user: {user_id}")
                 party = update_score(party, user_id, answer)
                 save_party_to_redis(party_id, party)
-                await broadcast_to_party(party_id, {
-                    "event": "score_update",
-                    "user_id": user_id,
-                    "score": party["players"][user_id]["score"]
-                })
             elif response.get("event") == "start_game":
                 print(f"Starting game for party: {party_id}")
                 await start_game(PartyStartRequest(party_id=party_id, user_id=user_id))
                 
     except WebSocketDisconnect:
         print(f"WebSocket disconnected for party: {party_id}")
-        # rework so that disconnected users are removed from the party
-        websocket_connections[party_id].remove(websocket)
-        if not websocket_connections[party_id]:
+        # Find and remove the disconnected websocket
+        party_sockets = websocket_connections.get(party_id, {})
+        if user_id in party_sockets and party_sockets[user_id] == websocket:
+            print(f"Removing disconnected websocket for user: {user_id}")
+            del party_sockets[user_id]
+            await broadcast_to_party(party_id, {
+                "event": "player_left",
+                "user_id": user_id,
+                "participants": get_user_ids_for_party(party_id)
+            })
+        if not party_sockets:
             # Remove party if no players are connected, this will lose all user scores!
             delete_party_from_redis(party_id)
+        else:
+            websocket_connections[party_id] = party_sockets
+
 
 
 async def broadcast_to_party(party_id: str, message: dict):
     party = load_party_from_redis(party_id)
     if party:
-        for websocket in websocket_connections[party_id]:
+        party_sockets = websocket_connections.get(party_id, {})
+        for user_id, websocket in party_sockets.items():
             await websocket.send_json(message)
 
 
@@ -274,19 +291,36 @@ def load_party_from_redis(party_id):
 def delete_party_from_redis(party_id):
     redis_client.delete(f"party:{party_id}")
 
+@app.get("/api/party/{party_id}")
+def get_party_details(party_id: str):
+    party = load_party_from_redis(party_id)
+    if not party:
+        raise HTTPException(status_code=405, detail="Party not found")
+    # Return relevant party details, including the creator's ID
+    return JSONResponse({
+        "party_id": party_id,
+        "creator_id": party.get("creator"),
+        "state": party.get("state"),
+        "rounds": party.get("rounds"),
+        "participants": get_user_ids_for_party(party_id)
+    })
+
 @app.get("/api/parties")
 async def get_all_parties():
+    users = await get_all_users()
     parties = []
     for key in redis_client.scan_iter("party:*"):
         party_data = redis_client.get(key)
+        party_id = key.split(":")[1]
         if party_data:
             party = json.loads(party_data)
+            party_creator = party.get("creator")
             parties.append({
-                "party_id": key.split(":")[1],
-                "creator": party.get("creator"),
+                "party_id": party_id,
+                "creator": users[party_creator].get("user_name"), # TODO: fix this.  User may not be in redis
                 "state": party.get("state"),
                 "rounds": party.get("rounds"),
-                "participants": list(party.get("players", {}).keys())
+                "participants": get_user_ids_for_party(party_id)
             })
     return JSONResponse({"parties": parties})
 
@@ -332,7 +366,6 @@ def update_score(party, user_id, answer):
     if answer == correct_answer:
         print(f"Correct answer: {answer} for user: {user_id}")
         update_player_score(party, user_id)
-        # Update performance by category
         update_category_score(party, user_id)
     return party
 
@@ -348,12 +381,60 @@ def update_category_score(party, user_id):
     return party
 
 def init_player_score(party, user_id):
-    # Initialize player in the party if not already present
     party["players"][user_id] = {
             "score": 0,
             "category_scores": {}
     }
     return party
 
+
 def save_party_to_redis(party_id, party_data):
     redis_client.set(f"party:{party_id}", json.dumps(party_data))
+
+def save_user_to_redis(user_id, user_data):
+    redis_client.set(f"user:{user_id}", json.dumps(user_data))
+
+def load_user_from_redis(user_id):
+    data = redis_client.get(f"user:{user_id}")
+    return json.loads(data) if data else None
+
+async def get_all_users():
+    users = {}
+    for key in redis_client.scan_iter("user:*"):
+        user_data = redis_client.get(key)
+        if user_data:
+            user = json.loads(user_data)
+            user_id = key.split(':')[1]
+            users[user_id] = user
+    return users
+
+def get_user_ids_for_party(party_id: str) -> str:
+    party_sockets = websocket_connections.get(party_id, {})
+    user_names = []
+    for user_id in party_sockets.keys():
+        user_data = load_user_from_redis(user_id)
+        if user_data:
+            user_names.append(user_data.get("user_name", "Unknown"))
+    return ','.join(user_names)
+
+def get_player_scores_with_names_and_categories(party_id: str) -> dict:
+    party = load_party_from_redis(party_id)
+    if not party:
+        raise HTTPException(status_code=404, detail="Party not found")
+
+    player_scores = {}
+    for user_id, player_data in party["players"].items():
+        user_data = load_user_from_redis(user_id)
+        if user_data:
+            user_name = user_data.get("user_name", "Unknown")
+            player_scores[user_name] = {
+                "total_score": player_data["score"],
+                "category_scores": player_data.get("category_scores", {})
+            }
+
+    return player_scores
+
+def is_user_in_party(party_id: str, user_id: str) -> bool:
+    party_sockets = websocket_connections.get(party_id, {})
+    return user_id in party_sockets
+
