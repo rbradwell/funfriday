@@ -190,6 +190,7 @@ async def join_party(party_id: str, request: PartyJoinRequest):
     return JSONResponse({"message": "Joined party successfully", "game_id": party["game_id"]})
 
 def add_websocket_for_userid(party_id: str, user_id: str, websocket: WebSocket):
+    # TODO: probably need to lock this shared resource
     party_sockets = websocket_connections.get(party_id, {})
     party_sockets[user_id] = websocket
     websocket_connections[party_id] = party_sockets
@@ -214,7 +215,6 @@ async def websocket_endpoint(websocket: WebSocket, party_id: str, user_id: str):
         await websocket.close()
         return
 
-    # Add the client to the party's connection list
     add_websocket_for_userid(party_id, user_id, websocket)
 
     try:
@@ -241,7 +241,7 @@ async def websocket_endpoint(websocket: WebSocket, party_id: str, user_id: str):
 
             if not is_user_in_party(party_id, user_id):
                 await websocket.close(code=1008)
-                raise HTTPException(status_code=403, detail="User not connected to party")
+                raise HTTPException(status_code=404, detail="User not connected to party")
 
             if response.get("event") == "answer":
                 answer = response.get("answer")
@@ -269,7 +269,6 @@ async def websocket_endpoint(websocket: WebSocket, party_id: str, user_id: str):
             delete_party_from_redis(party_id)
         else:
             websocket_connections[party_id] = party_sockets
-
 
 
 async def broadcast_to_party(party_id: str, message: dict):
@@ -321,7 +320,6 @@ async def get_all_parties():
             })
     return JSONResponse({"parties": parties})
 
-
 @app.get("/api/categories")
 async def get_categories():
     with get_db_connection() as conn:
@@ -329,11 +327,9 @@ async def get_categories():
             cursor.execute("SELECT DISTINCT category FROM questions")
             categories = cursor.fetchall()
     
-    # Extract categories from the query result
     category_list = [category[0] for category in categories]
     
     return JSONResponse({"categories": category_list})
-
 
 def get_party_or_404(party_id: str):
     party = load_party_from_redis(party_id)
