@@ -7,61 +7,82 @@ import StartQuiz from './StartQuiz';
 import QuestionView from './questions/QuestionView';
 
 function QuizPage() {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState()
+  const [pageState, setPageState] = useState({
+    loading: true,
+    error: null,
+  });
+
+  const [partyConfig, setPartyConfig] = useState({
+    partyId: null,
+    userId: null,
+    creatorId: null,
+  });
+
+  const [quizState, setQuizState] = useState({
+    currentQuestion: null,
+    selectedChoice: null,
+    submittedAnswer: null,
+    timeLeft: null,
+    scores: null,
+  });
+
   const [socket, setSocket] = useState(null);
-  const [partyId, setPartyId] = useState(null);
-  const [currentQuestion, setCurrentQuestion] = useState(null);
-  const [selectedChoice, setSelectedChoice] = useState(null);
-  const [submittedAnswer, setSubmittedAnswer] = useState(null);
   const [searchParams] = useSearchParams();
-  const [scores, setScores] = useState(null);
   const navigate = useNavigate();
-  const [timeLeft, setTimeLeft] = useState(null);
-  const [userId, setUserId] = useState(null);
-  const [creatorId, setCreatorId] = useState(null);
 
   useEffect(() => {
     const partyIdFromUrl = searchParams.get("party_id");
     const userIdFromUrl = searchParams.get("user_id");
     if (!partyIdFromUrl) {
-      setError("Party ID is missing.");
-      setLoading(false);
+      setPageState({
+        ...pageState,
+        error: "Party ID is missing.",
+        loading: false,
+      });
       return;
     }
     if (partyIdFromUrl) {
-      setPartyId(partyIdFromUrl);
+      setPartyConfig((prevConfig) => ({
+        ...prevConfig,
+        partyId: partyIdFromUrl,
+      }));
     }
     if (userIdFromUrl) {
-      setUserId(userIdFromUrl);
+      setPartyConfig((prevConfig) => ({
+        ...prevConfig,
+        userId: userIdFromUrl,
+      }));
     }
   }, [searchParams]);
 
   useEffect(() => {
     let timer;
-    if (currentQuestion && currentQuestion.timeout) {
-      setTimeLeft(currentQuestion.timeout);
+    if (quizState.currentQuestion && quizState.currentQuestion.timeout) {
+      setQuizState({
+        ...quizState,
+        timeLeft: quizState.currentQuestion.timeout,
+      });
       timer = setInterval(() => {
-        setTimeLeft((prevTime) => {
-          if (prevTime <= 1) {
-            clearInterval(timer);
-            return 0;
-          }
-          return prevTime - 1;
-        });
+        setQuizState((prevState) => ({
+          ...prevState,
+          timeLeft: prevState.timeLeft <= 1 ? 0 : prevState.timeLeft - 1,
+        }));
+        if (quizState.timeLeft <= 1) {
+          clearInterval(timer);
+        }
       }, 1000);
     }
 
     return () => {
       clearInterval(timer);
     };
-  }, [currentQuestion]);
+  }, [quizState.currentQuestion]);
 
   useEffect(() => {
-    if (partyId) {
+    if (partyConfig.partyId) {
       // TODO - handle websocket connection errors and reconnect
       const playerId = localStorage.getItem('playerId');
-      const websocket = new WebSocket(`ws://localhost:8000/ws/${partyId}?user_id=${playerId}`);
+      const websocket = new WebSocket(`ws://localhost:8000/ws/${partyConfig.partyId}?user_id=${playerId}`);
 
       websocket.onopen = () => {
         console.log('WebSocket connection opened');
@@ -71,28 +92,40 @@ function QuizPage() {
         console.log('WebSocket message received:', event.data);
         const quizData = JSON.parse(event.data);
         if (quizData.event === "new_question") {
-          setCurrentQuestion({
-            question: quizData.question,
-            choices: quizData.choices,
-            timeout: quizData.timeout
+          setQuizState({
+            ...quizState,
+            currentQuestion: {
+              question: quizData.question,
+              choices: quizData.choices,
+              timeout: quizData.timeout
+            },
+            loading: false,
+            selectedChoice: null,
+            submittedAnswer: null,
+            timeLeft: quizData.timeout,
           });
-          setLoading(false);
-          setSelectedChoice(null);
-          setSubmittedAnswer(null);
-          setTimeLeft(quizData.timeout);
         } else if (quizData.event === "game_over") {
-          setScores(quizData.scores);
-          setLoading(false);
-          setTimeLeft(null);
+          setQuizState({
+            ...quizState,
+            scores: quizData.scores,
+            loading: false,
+            timeLeft: null,
+          });
           setTimeout(() => {
             navigate(`/`); // Redirect to LobbyPage
           }, 5000);
         }
-        setLoading(false);
+        setPageState({
+          ...pageState,
+          loading: false,
+        });
       };
 
       websocket.onerror = (event) => {
-        setError('WebSocket error occurred');
+        setPageState({
+          ...pageState,
+          error: 'WebSocket error occurred',
+        });
       };
       setSocket(websocket);
       return () => {
@@ -102,44 +135,56 @@ function QuizPage() {
         }
       };
     }
-  }, [partyId]);
+  }, [partyConfig.partyId]);
 
   useEffect(() => {
-    if (partyId) {
+    if (partyConfig.partyId) {
       const fetchCreatorId = async () => {
         try {
-          const response = await fetch(`/api/party/${partyId}`);
+          const response = await fetch(`/api/party/${partyConfig.partyId}`);
           const data = await response.json();
-          setCreatorId(data.creator_id); // Assume the API returns the creator's ID
+          setPartyConfig((prevConfig) => ({
+            ...prevConfig,
+            creatorId: data.creator_id,
+          }));
         } catch (error) {
           console.error("Failed to fetch creator ID:", error);
-          setError("Failed to fetch creator ID.");
+          setPageState({
+            ...pageState,
+            error: "Failed to fetch creator ID.",
+          });
         }
       };
 
       fetchCreatorId();
     }
-  }, [partyId]);
+  }, [partyConfig.partyId]);
 
   const handleChoiceClick = (choice) => {
-    if (!submittedAnswer) {
-      setSelectedChoice(choice);
+    if (!quizState.submittedAnswer) {
+      setQuizState({
+        ...quizState,
+        selectedChoice: choice,
+      });
     }
   };
 
   const handleSubmitAnswer = () => {
-    if (socket && selectedChoice) {
-      console.log('sending answer selectedChoice', selectedChoice, 'to websocket with partyId', partyId);
+    if (socket && quizState.selectedChoice) {
+      console.log('sending answer selectedChoice', quizState.selectedChoice, 'to websocket with partyId', partyConfig.partyId);
       const playerId = localStorage.getItem('playerId');
       socket.send(
         JSON.stringify({
           event: "answer",
-          answer: selectedChoice,
+          answer: quizState.selectedChoice,
           user_id: playerId,
-          party_id: partyId
+          party_id: partyConfig.partyId
         })
       );
-      setSubmittedAnswer(true);
+      setQuizState({
+        ...quizState,
+        submittedAnswer: true,
+      });
     }
   };
 
@@ -162,32 +207,28 @@ function QuizPage() {
 
   };
 
-  if (error) {
-    return <ErrorPanel error={error} />;
+  if (pageState.error) {
+    return <ErrorPanel error={pageState.error} />;
   }
 
-  if (loading) {
+  if (pageState.loading) {
     return (
       <StartQuiz
-        userId={userId}
-        creatorId={creatorId}
+        partyConfig={partyConfig}
         onStartGame={handleStartGame}
       />
     );
   }
 
-  if (scores) {
+  if (quizState.scores) {
     return (
-      <FinalScores scores={scores} />
+      <FinalScores scores={quizState.scores} />
     );
   }
 
   return (
     <QuestionView
-      currentQuestion={currentQuestion}
-      timeLeft={timeLeft}
-      selectedChoice={selectedChoice}
-      submittedAnswer={submittedAnswer}
+      quizState={quizState}
       handleChoiceClick={handleChoiceClick}
       handleSubmitAnswer={handleSubmitAnswer}
     />

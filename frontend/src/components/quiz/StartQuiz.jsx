@@ -1,6 +1,9 @@
 import React from 'react';
 
-function StartQuiz({ userId, creatorId, onStartGame }) {
+function StartQuiz({ partyConfig, onStartGame }) {
+  console.log('In start quiz', partyConfig);
+  const { userId, creatorId } = partyConfig;
+
   return (
     <div>
       <p style={{ color: "blue", marginBottom: "20px" }}>

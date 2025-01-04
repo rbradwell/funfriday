@@ -1,7 +1,10 @@
 import React from 'react';
 import AnswersList from './AnswersList';
 
-function QuestionView({ currentQuestion, timeLeft, selectedChoice, submittedAnswer, handleChoiceClick, handleSubmitAnswer }) {
+function QuestionView({ quizState, handleChoiceClick, handleSubmitAnswer }) {
+  console.log('In question view', quizState);
+  const { currentQuestion, timeLeft, selectedChoice, submittedAnswer } = quizState;
+
   return (
     <main>
       <section className="container">
@@ -22,7 +25,7 @@ function QuestionView({ currentQuestion, timeLeft, selectedChoice, submittedAnsw
           <button
             type="button"
             className="btn btn-block"
-            onClick={handleSubmitAnswer}
+            onClick={() => handleSubmitAnswer()}
             disabled={!selectedChoice}
           >
             Submit Answer
