@@ -1,6 +1,10 @@
 import {React, useState, useEffect} from 'react';
 import { useSearchParams } from "react-router-dom";
 import { useNavigate } from 'react-router-dom';
+import FinalScores from './FinalScores';
+import ErrorPanel from '../common/ErrorPanel';
+import StartQuiz from './StartQuiz';
+import QuestionView from './QuestionView';
 
 function QuizPage() {
   const [loading, setLoading] = useState(true);
@@ -159,93 +163,34 @@ function QuizPage() {
   };
 
   if (error) {
-    return (
-      <div style={{ color: "red", padding: "10px", border: "1px solid red" }}>
-        <h3>Error</h3>
-        <p>{error}</p>
-      </div>
-    );
+    return <ErrorPanel error={error} />;
   }
 
   if (loading) {
     return (
-      <div>
-        <p style={{ color: "blue", marginBottom: "20px" }}>
-          Waiting for game to start!
-        </p>
-        {userId === creatorId && (
-          <button onClick={handleStartGame} className="btn btn-block">
-            Start Game
-          </button>
-        )}
-      </div>
+      <StartQuiz
+        userId={userId}
+        creatorId={creatorId}
+        onStartGame={handleStartGame}
+      />
     );
   }
 
   if (scores) {
     return (
-      <main>
-      <section className="container">
-        <h3>Game Over! Scores:</h3>
-        <ul>
-          {Object.entries(scores).map(([userId, scoreData]) => (
-            <li key={userId}>
-              <p>User {userId}: {scoreData.total_score}</p>
-              <ul>
-                {Object.entries(scoreData.category_scores).map(([category, categoryScore]) => (
-                  <li key={category}>
-                    {category} category : {categoryScore}
-                  </li>
-                ))}
-              </ul>
-            </li>
-          ))}
-        </ul>
-        <p>Redirecting to the lobby in 5 seconds...</p>
-      </section>
-      </main>
+      <FinalScores scores={scores} />
     );
   }
 
   return (
-    <main>
-      <section className="container">
-        <br/><br/>
-        <h3>{currentQuestion.question}</h3>
-        {timeLeft !== null && (
-          <p>Time left: {timeLeft} seconds</p>
-        )}
-        <ul style={{ listStyleType: "none", padding: 0 }}>
-          {currentQuestion.choices.map((choice, index) => (
-            <li
-              key={index}
-              onClick={() => handleChoiceClick(choice)}
-              style={{
-                cursor: submittedAnswer ? "default" : "pointer",
-                padding: "10px",
-                margin: "5px 0",
-                border: selectedChoice === choice && !submittedAnswer ? "2px solid #4caf50" : "1px solid #ccc",
-                borderRadius: "5px",
-              }}
-            >
-              {choice}
-            </li>
-          ))}
-        </ul>
-        {submittedAnswer ? (
-          <p>You answered: <strong>{selectedChoice}</strong></p>
-        ) : (
-          <button
-            type="button"
-            className="btn btn-block"
-            onClick={handleSubmitAnswer}
-            disabled={!selectedChoice}
-          >
-            Submit Answer
-          </button>
-        )}
-      </section>
-    </main>
+    <QuestionView
+      currentQuestion={currentQuestion}
+      timeLeft={timeLeft}
+      selectedChoice={selectedChoice}
+      submittedAnswer={submittedAnswer}
+      handleChoiceClick={handleChoiceClick}
+      handleSubmitAnswer={handleSubmitAnswer}
+    />
   );
 }
 

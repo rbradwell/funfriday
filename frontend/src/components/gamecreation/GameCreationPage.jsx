@@ -1,15 +1,19 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 // TODO - shouldnt be able to get to this page if already in a party, should be redirected to lobby if not logged in
 function GameCreationPage() {
-    const [playerId, setPlayerId] = useState(localStorage.getItem('playerId') || '');
-    const [category, setCategory] = useState('');
-    const [rounds, setRounds] = useState(1);
-    const [timeout, setTimeout] = useState(30);
-    const [categories, setCategories] = useState([]);
+    const [state, setState] = useState({
+        playerId: localStorage.getItem('playerId') || '',
+        category: '',
+        rounds: 1,
+        timeout: 30,
+        categories: []
+    });
     const navigate = useNavigate();
+    const categoryRef = useRef();
+    const roundsRef = useRef();
+    const timeoutRef = useRef();
 
     useEffect(() => {
         const fetchCategories = async () => {
@@ -19,7 +23,7 @@ function GameCreationPage() {
                     throw new Error('Failed to fetch categories');
                 }
                 const data = await response.json();
-                setCategories(data.categories);
+                setState(prevState => ({ ...prevState, categories: data.categories }));
             } catch (error) {
                 alert('Error: ' + error.message);
             }
@@ -29,6 +33,10 @@ function GameCreationPage() {
 
     const handlePartyCreationSubmit = async (event) => {
         event.preventDefault();
+        const playerId = state.playerId;
+        const category = categoryRef.current.value;
+        const rounds = parseInt(roundsRef.current.value, 10);
+        const timeout = parseInt(timeoutRef.current.value, 10);
         console.log('creating party', playerId, category, rounds, timeout);
         try {
             const response = await fetch('/api/party/init', {
@@ -65,12 +73,12 @@ function GameCreationPage() {
                     <label>
                         Category:
                         <select
-                            value={category}
-                            onChange={(e) => setCategory(e.target.value)}
+                            ref={categoryRef}
+                            defaultValue={state.category}
                             required
                         >
                             <option value="" disabled>Select a category</option>
-                            {categories.map((cat) => (
+                            {state.categories.map((cat) => (
                                 <option key={cat} value={cat}>{cat}</option>
                             ))}
                         </select>
@@ -81,8 +89,8 @@ function GameCreationPage() {
                         Rounds:
                         <input
                             type="number"
-                            value={rounds}
-                            onChange={(e) => setRounds(parseInt(e.target.value, 10))}
+                            ref={roundsRef}
+                            defaultValue={state.rounds}
                             required
                         />
                     </label>
@@ -92,8 +100,8 @@ function GameCreationPage() {
                         Timeout (seconds):
                         <input
                             type="number"
-                            value={timeout}
-                            onChange={(e) => setTimeout(parseInt(e.target.value, 10))}
+                            ref={timeoutRef}
+                            defaultValue={state.timeout}
                             required
                         />
                     </label>

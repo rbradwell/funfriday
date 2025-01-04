@@ -1,8 +1,8 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import GameCreationPage from './components/GameCreationPage';
-import QuizPage from './components/QuizPage';
-import LobbyPage from './components/LobbyPage';
+import GameCreationPage from './components/gamecreation/GameCreationPage';
+import QuizPage from './components/quizpage/QuizPage';
+import LobbyPage from './components/lobby/LobbyPage';
 function App() {
     return (
             <Router>

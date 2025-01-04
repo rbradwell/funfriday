@@ -6,13 +6,12 @@ import { useNavigate } from 'react-router-dom';
 function LobbyPage() {
     const [parties, setParties] = useState([]);
     const [playerId, setPlayerId] = useState(localStorage.getItem('playerId') || null);
-    const [loggedIn, setLoggedIn] = useState(false);
     const navigate = useNavigate();
     const playerNameRef = useRef(null);
+
     useEffect(() => {
-        if (playerId && localStorage.getItem('playerId')) {
+        if (playerId) {
             console.log('playerId', playerId);
-            setLoggedIn(true);
             console.log('logged in');
         }
     }, [playerId]);
@@ -30,11 +29,11 @@ function LobbyPage() {
 
         fetchParties();
 
-        if (loggedIn) {
+        if (playerId) {
             const interval = setInterval(fetchParties, 5000);
             return () => clearInterval(interval);
         }
-    }, [loggedIn]);
+    }, [playerId]);
 
     const handleJoinParty = async (partyId) => {
         console.log('joining party', partyId);
@@ -59,8 +58,7 @@ function LobbyPage() {
                 });
                 localStorage.setItem('playerId', response.data.user_id);
                 setPlayerId(response.data.user_id);
-                setLoggedIn(true);
-                } catch (error) {
+            } catch (error) {
                 alert('Error registering player: ' + error.message);
             }    
         }
@@ -69,7 +67,7 @@ function LobbyPage() {
     return (
         <main>
             <section className="container">
-                {!loggedIn ? (
+                {!playerId ? (
                     <form onSubmit={handleLogin}>
                         <label>
                             Player ID:
