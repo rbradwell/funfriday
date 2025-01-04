@@ -1,10 +1,10 @@
 import {React, useState, useEffect} from 'react';
 import { useSearchParams } from "react-router-dom";
 import { useNavigate } from 'react-router-dom';
-import FinalScores from './FinalScores';
+import FinalScores from './scores/FinalScores';
 import ErrorPanel from '../common/ErrorPanel';
 import StartQuiz from './StartQuiz';
-import QuestionView from './QuestionView';
+import QuestionView from './questions/QuestionView';
 
 function QuizPage() {
   const [loading, setLoading] = useState(true);

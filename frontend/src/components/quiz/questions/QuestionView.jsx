@@ -1,4 +1,5 @@
 import React from 'react';
+import AnswersList from './AnswersList';
 
 function QuestionView({ currentQuestion, timeLeft, selectedChoice, submittedAnswer, handleChoiceClick, handleSubmitAnswer }) {
   return (
@@ -9,23 +10,12 @@ function QuestionView({ currentQuestion, timeLeft, selectedChoice, submittedAnsw
         {timeLeft !== null && (
           <p>Time left: {timeLeft} seconds</p>
         )}
-        <ul style={{ listStyleType: "none", padding: 0 }}>
-          {currentQuestion.choices.map((choice, index) => (
-            <li
-              key={index}
-              onClick={() => handleChoiceClick(choice)}
-              style={{
-                cursor: submittedAnswer ? "default" : "pointer",
-                padding: "10px",
-                margin: "5px 0",
-                border: selectedChoice === choice && !submittedAnswer ? "2px solid #4caf50" : "1px solid #ccc",
-                borderRadius: "5px",
-              }}
-            >
-              {choice}
-            </li>
-          ))}
-        </ul>
+        <AnswersList
+          choices={currentQuestion.choices}
+          selectedChoice={selectedChoice}
+          submittedAnswer={submittedAnswer}
+          handleChoiceClick={handleChoiceClick}
+        />
         {submittedAnswer ? (
           <p>You answered: <strong>{selectedChoice}</strong></p>
         ) : (
