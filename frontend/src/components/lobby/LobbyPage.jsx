@@ -36,19 +36,6 @@ function LobbyPage() {
         }
     }, [playerId]);
 
-    const handleJoinParty = async (partyId) => {
-        console.log('joining party', partyId);
-        console.log('playerId', playerId);
-        try {
-            const response = await axios.post(`/api/party/${partyId}/join`, {
-                user_id: playerId
-            });
-            navigate(`/quiz?party_id=${partyId}&user_id=${playerId}`);
-        } catch (error) {
-            alert('Error joining party: ' + error.message);
-        }
-    };
-
     const handleLogin = async (playerName) => {
         try {
             const response = await axios.post(`/api/user/create`, {
@@ -67,14 +54,7 @@ function LobbyPage() {
                 {!playerId ? (
                     <UserLogin onLogin={handleLogin} />
                 ) : (
-                    parties.length === 0 ? (
-                        <>
-                            <h3>No games have been created yet...</h3>
-                            <button onClick={() => navigate('/create')}>Create a Game</button>
-                        </>
-                    ) : (
-                        <GamePartyList parties={parties} handleJoinParty={handleJoinParty} />
-                    )
+                    <GamePartyList parties={parties} />
                 )}
             </section>
         </main>
