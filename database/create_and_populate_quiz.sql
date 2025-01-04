@@ -9,28 +9,6 @@ CREATE TABLE questions (
     category TEXT NOT NULL
 );
 
-CREATE TABLE parties (
-    party_id UUID PRIMARY KEY,
-    game_id UUID NOT NULL,
-    player_id TEXT NOT NULL
-);
-
-CREATE TABLE game_rounds (
-    game_id UUID NOT NULL,
-    round_number INTEGER NOT NULL,
-    category TEXT NOT NULL,
-    question_index INTEGER NOT NULL,
-    PRIMARY KEY (game_id, round_number)
-);
-
-CREATE TABLE party_players (
-    party_id UUID NOT NULL,
-    user_id TEXT NOT NULL,
-    score INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (party_id, user_id)
-);
-
-
 -- Load data from all JSON files in the directory
 DO
 $do$

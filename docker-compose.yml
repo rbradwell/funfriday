@@ -8,17 +8,6 @@ services:
     ports:
       - "5432:5432"
 
-  # frontend:
-  #   build:
-  #     context: ./frontend
-  #     dockerfile: Dockerfile
-  #   ports:
-  #     - "3000:3000"
-  #   volumes:
-  #     - ./frontend:/app
-  #   environment:
-  #     - NODE_ENV=production
-
   quizbackend:
     build: ./app
     ports:
@@ -38,4 +27,3 @@ services:
     image: redis:7
     ports:
       - "6379:6379"
-

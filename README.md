@@ -1,7 +1,17 @@
-# quiz-backend
+# A multiperson quiz app
 
-This is ai generated.  Prompts are included.  Only some of it is tested, likely to need further refinement of the prompts, but this project will continue to be all ai generated.
+## Running the backend
 
-AIs used are gemini 1.5 pro, claude.ai and chatgpt
+From the root directory run the command `docker compose up` </br></br>
 
-note app/gemini is an old version created by gemini, is not used, but has been kept to show the difference in code quality in different AIs
+## Running the frontend
+
+Unfortunately the frontend hasn't been dockerized yet. From the root directory issue the commands
+
+- `cd frontend`
+- `npm install`
+- `npm run dev`
+
+The app should be available @ http://localhost:5173/
+
+Currently there is a temporary solution to logging into the app that requires work. When the user logs in the user id is stored in local storage. When restarting the app clear the appropriate local storage in the browser.
